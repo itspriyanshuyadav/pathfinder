@@ -69,3 +69,12 @@ export type MissionAction =
   | { type: "SET_API_STATUS"; payload: { apiOnline: boolean; modelLoaded: boolean } }
   | { type: "SET_ACTIVE_TAB"; payload: MissionState["activeTab"] }
   | { type: "RESET" };
+
+export type PointSelectionMode = "none" | "start" | "goal";
+
+export interface ManualPathRequest {
+  image_base64: string;
+  start_point:  [number, number];
+  goal_point:   [number, number];
+}
+

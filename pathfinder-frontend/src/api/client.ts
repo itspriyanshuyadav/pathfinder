@@ -11,13 +11,13 @@ const apiClient = axios.create({
 apiClient.interceptors.request.use((config) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] → ${config.method?.toUpperCase()} ${config.url}`);
-  (config as Record<string, unknown>)._startTime = Date.now();
+  (config as unknown as Record<string, unknown>)._startTime = Date.now();
   return config;
 });
 
 apiClient.interceptors.response.use(
   (response) => {
-    const start = (response.config as Record<string, unknown>)._startTime as number;
+    const start = (response.config as unknown as Record<string, unknown>)._startTime as number;
     const duration = Date.now() - start;
     console.log(
       `[RESPONSE] ${response.config.url} — ${response.status} (${duration}ms)`

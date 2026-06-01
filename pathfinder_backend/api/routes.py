@@ -66,6 +66,12 @@ class SegmentOnlyResponse(BaseModel):
     class_distribution: dict[str, float]
 
 
+class ManualPathRequest(BaseModel):
+    image_base64: str
+    start_point: list[int]
+    goal_point: list[int]
+
+
 class HealthResponse(BaseModel):
     """Health check response."""
     status: str
@@ -232,4 +238,81 @@ async def analyze(body: ImageRequest, request: Request) -> dict[str, Any]:
 
     except Exception as exc:
         logger.exception("Unexpected error in /analyze")
+        return {"status": "error", "message": f"Internal error: {exc}"}
+
+
+@router.post("/manual-path", response_model=AnalyzeResponse)
+async def manual_path(body: ManualPathRequest, request: Request) -> dict[str, Any]:
+    """
+    Manual path pipeline. Runs analysis pipeline with manual start and goal points.
+    """
+    t_start = time.perf_counter()
+
+    try:
+        model = request.app.state.model
+
+        # Step 1 — decode
+        pil_image = decode_base64_to_pil(body.image_base64)
+        logger.info("Received image for manual path analysis: size=%s", pil_image.size)
+
+        # Step 2 — segmentation
+        mask = get_segmentation_mask(model, pil_image)
+
+        # Step 3 — manual points (from request body)
+        start = tuple(body.start_point)
+        goal = tuple(body.goal_point)
+
+        # Step 4 — cost map
+        cost_map = generate_cost_map(mask)
+
+        # Step 5 — A* pathfinding
+        path = astar(cost_map, start, goal)
+
+        if not path:
+            logger.warning("A* returned empty path — map may be disconnected")
+
+        # Cost statistics along the path
+        if path:
+            path_costs = [float(cost_map[r, c]) for r, c in path]
+            cost_stats = CostMapStats(
+                min_cost=min(path_costs),
+                max_cost=max(path_costs),
+                avg_path_cost=round(sum(path_costs) / len(path_costs), 2),
+            )
+        else:
+            cost_stats = CostMapStats(
+                min_cost=float(cost_map.min()),
+                max_cost=float(cost_map.max()),
+                avg_path_cost=0.0,
+            )
+
+        # Step 6 — visualisation
+        result_image = draw_output(pil_image, mask, path, start, goal)
+        result_b64 = encode_pil_to_base64(result_image)
+
+        colour_mask = numpy_mask_to_colorized_pil(mask)
+        mask_b64 = encode_pil_to_base64(colour_mask)
+
+        t_end = time.perf_counter()
+        processing_ms = round((t_end - t_start) * 1000, 2)
+        logger.info("Manual analysis complete in %.2f ms", processing_ms)
+
+        return {
+            "status": "success",
+            "start_point": list(start),
+            "goal_point": list(goal),
+            "path_length": len(path),
+            "path_coordinates": [list(p) for p in path],
+            "result_image_base64": result_b64,
+            "segmentation_mask_base64": mask_b64,
+            "cost_map_stats": cost_stats,
+            "processing_time_ms": processing_ms,
+        }
+
+    except ValueError as ve:
+        logger.error("Validation error in /manual-path: %s", ve)
+        return {"status": "error", "message": str(ve)}
+
+    except Exception as exc:
+        logger.exception("Unexpected error in /manual-path")
         return {"status": "error", "message": f"Internal error: {exc}"}
